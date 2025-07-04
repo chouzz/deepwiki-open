@@ -4,7 +4,7 @@ from pathlib import Path
 
 class IgnoreLogChangeDetectedFilter(logging.Filter):
     def filter(self, record: logging.LogRecord):
-        return "change detected" not in record.getMessage()
+        return "Detected file change in" not in record.getMessage()
 
 def setup_logging(format: str = None):
     """
