@@ -16,6 +16,9 @@ from api.ollama_patch import OllamaDocumentProcessor
 from urllib.parse import urlparse, urlunparse, quote
 import requests
 from requests.exceptions import RequestException
+import uuid
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
 
 from api.tools.embedder import get_embedder
 
@@ -410,6 +413,32 @@ def transform_documents_and_save_to_db(
     db.transform(key="split_and_embed")
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     db.save_state(filepath=db_path)
+
+    # Save to Qdrant as well
+    transformed_docs = db.get_transformed_data(key="split_and_embed")
+    if transformed_docs and transformed_docs[0].vector:
+        qdrant_path = os.path.join(os.path.dirname(db_path), "qdrant")
+        client = QdrantClient(path=qdrant_path)
+        collection_name = "documents"
+        vector_size = len(transformed_docs[0].vector)
+        client.recreate_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
+        )
+        points = [
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=doc.vector,
+                payload={
+                    "text": doc.text,
+                    "meta_data": doc.meta_data
+                }
+            ) for doc in transformed_docs
+        ]
+        client.upsert(
+            collection_name=collection_name,
+            points=points
+        )
     return db
 
 def get_github_file_content(repo_url: str, file_path: str, access_token: str = None) -> str:
