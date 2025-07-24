@@ -19,6 +19,7 @@ from requests.exceptions import RequestException
 import uuid
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
+import chardet
 
 from api.tools.embedder import get_embedder
 
@@ -285,35 +286,42 @@ def read_all_documents(path: str, is_ollama_embedder: bool = None, excluded_dirs
                 continue
 
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    relative_path = os.path.relpath(file_path, path)
+                with open(file_path, "rb") as f:
+                    raw_content = f.read()
+                detected = chardet.detect(raw_content)
+                encoding = detected["encoding"] or "utf-8"
+                try:
+                    content = raw_content.decode(encoding)
+                except UnicodeDecodeError:
+                    logger.warning(f"Failed to decode {file_path} with detected encoding {encoding}, falling back to utf-8 with ignore errors.")
+                    content = raw_content.decode("utf-8", errors="ignore")
+                relative_path = os.path.relpath(file_path, path)
 
-                    # Determine if this is an implementation file
-                    is_implementation = (
-                        not relative_path.startswith("test_")
-                        and not relative_path.startswith("app_")
-                        and "test" not in relative_path.lower()
-                    )
+                # Determine if this is an implementation file
+                is_implementation = (
+                    not relative_path.startswith("test_")
+                    and not relative_path.startswith("app_")
+                    and "test" not in relative_path.lower()
+                )
 
-                    # Check token count
-                    token_count = count_tokens(content, is_ollama_embedder)
-                    if token_count > MAX_EMBEDDING_TOKENS * 10:
-                        logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
-                        continue
+                # Check token count
+                token_count = count_tokens(content, is_ollama_embedder)
+                if token_count > MAX_EMBEDDING_TOKENS * 10:
+                    logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
+                    continue
 
-                    doc = Document(
-                        text=content,
-                        meta_data={
-                            "file_path": relative_path,
-                            "type": ext[1:],
-                            "is_code": True,
-                            "is_implementation": is_implementation,
-                            "title": relative_path,
-                            "token_count": token_count,
-                        },
-                    )
-                    documents.append(doc)
+                doc = Document(
+                    text=content,
+                    meta_data={
+                        "file_path": relative_path,
+                        "type": ext[1:],
+                        "is_code": True,
+                        "is_implementation": is_implementation,
+                        "title": relative_path,
+                        "token_count": token_count,
+                    },
+                )
+                documents.append(doc)
             except Exception as e:
                 logger.error(f"Error reading {file_path}: {e}")
 
@@ -326,28 +334,35 @@ def read_all_documents(path: str, is_ollama_embedder: bool = None, excluded_dirs
                 continue
 
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    content = f.read()
-                    relative_path = os.path.relpath(file_path, path)
+                with open(file_path, "rb") as f:
+                    raw_content = f.read()
+                detected = chardet.detect(raw_content)
+                encoding = detected["encoding"] or "utf-8"
+                try:
+                    content = raw_content.decode(encoding)
+                except UnicodeDecodeError:
+                    logger.warning(f"Failed to decode {file_path} with detected encoding {encoding}, falling back to utf-8 with ignore errors.")
+                    content = raw_content.decode("utf-8", errors="ignore")
+                relative_path = os.path.relpath(file_path, path)
 
-                    # Check token count
-                    token_count = count_tokens(content, is_ollama_embedder)
-                    if token_count > MAX_EMBEDDING_TOKENS:
-                        logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
-                        continue
+                # Check token count
+                token_count = count_tokens(content, is_ollama_embedder)
+                if token_count > MAX_EMBEDDING_TOKENS:
+                    logger.warning(f"Skipping large file {relative_path}: Token count ({token_count}) exceeds limit")
+                    continue
 
-                    doc = Document(
-                        text=content,
-                        meta_data={
-                            "file_path": relative_path,
-                            "type": ext[1:],
-                            "is_code": False,
-                            "is_implementation": False,
-                            "title": relative_path,
-                            "token_count": token_count,
-                        },
-                    )
-                    documents.append(doc)
+                doc = Document(
+                    text=content,
+                    meta_data={
+                        "file_path": relative_path,
+                        "type": ext[1:],
+                        "is_code": False,
+                        "is_implementation": False,
+                        "title": relative_path,
+                        "token_count": token_count,
+                    },
+                )
+                documents.append(doc)
             except Exception as e:
                 logger.error(f"Error reading {file_path}: {e}")
 
