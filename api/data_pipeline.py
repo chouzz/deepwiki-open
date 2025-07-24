@@ -416,29 +416,53 @@ def transform_documents_and_save_to_db(
 
     # Save to Qdrant as well
     transformed_docs = db.get_transformed_data(key="split_and_embed")
-    if transformed_docs and transformed_docs[0].vector:
-        qdrant_path = os.path.join(os.path.dirname(db_path), "qdrant")
-        client = QdrantClient(path=qdrant_path)
-        collection_name = "documents"
-        vector_size = len(transformed_docs[0].vector)
-        client.recreate_collection(
-            collection_name=collection_name,
-            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
-        )
-        points = [
-            PointStruct(
-                id=str(uuid.uuid4()),
-                vector=doc.vector,
-                payload={
-                    "text": doc.text,
-                    "meta_data": doc.meta_data
-                }
-            ) for doc in transformed_docs
-        ]
-        client.upsert(
-            collection_name=collection_name,
-            points=points
-        )
+    if transformed_docs:
+        # Filter valid documents with non-empty vectors
+        valid_docs = []
+        filtered_files = []
+        expected_size = None
+        for doc in transformed_docs:
+            if hasattr(doc, 'vector') and doc.vector and len(doc.vector) > 0:
+                current_size = len(doc.vector)
+                if expected_size is None:
+                    expected_size = current_size
+                if current_size == expected_size:
+                    valid_docs.append(doc)
+                else:
+                    file_path = doc.meta_data.get('file_path', 'unknown')
+                    filtered_files.append(file_path)
+                    logger.warning(f"Filtered out document '{file_path}' due to vector size mismatch: {current_size} != {expected_size}")
+            else:
+                file_path = doc.meta_data.get('file_path', 'unknown')
+                filtered_files.append(file_path)
+                logger.warning(f"Filtered out document '{file_path}' due to missing or empty vector")
+
+        if valid_docs:
+            qdrant_path = os.path.join(os.path.dirname(db_path), "qdrant")
+            client = QdrantClient(path=qdrant_path)
+            collection_name = "documents"
+            vector_size = len(valid_docs[0].vector)
+            client.recreate_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE)
+            )
+            points = [
+                PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=doc.vector,
+                    payload={
+                        "text": doc.text,
+                        "meta_data": doc.meta_data
+                    }
+                ) for doc in valid_docs
+            ]
+            client.upsert(
+                collection_name=collection_name,
+                points=points
+            )
+            logger.info(f"Successfully stored {len(valid_docs)} documents in Qdrant")
+        else:
+            logger.warning("No valid documents with vectors to store in Qdrant")
     return db
 
 def get_github_file_content(repo_url: str, file_path: str, access_token: str = None) -> str:
